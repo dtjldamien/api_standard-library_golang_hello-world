@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"net/url"
@@ -15,9 +16,43 @@ import (
 )
 
 const (
-	missingJWTErrorMessage = "Requires authentication"
-	invalidJWTErrorMessage = "Bad credentials"
+	missingJWTErrorMessage       = "Requires authentication"
+	invalidJWTErrorMessage       = "Bad credentials"
+	permissionDeniedErrorMessage = "Permission denied"
 )
+
+type CustomClaims struct {
+	Permissions []string `json:"permissions"`
+}
+
+func (c CustomClaims) Validate(ctx context.Context) error {
+	return nil
+}
+
+func (c CustomClaims) HasPermissions(expectedClaims []string) bool {
+	if len(expectedClaims) == 0 {
+		return false
+	}
+	for _, scope := range expectedClaims {
+		if !helpers.Contains(c.Permissions, scope) {
+			return false
+		}
+	}
+	return true
+}
+
+func ValidatePermissions(expectedClaims []string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := r.Context().Value(jwtmiddleware.ContextKey{}).(*validator.ValidatedClaims)
+		claims := token.CustomClaims.(*CustomClaims)
+		if !claims.HasPermissions(expectedClaims) {
+			errorMessage := ErrorMessage{Message: permissionDeniedErrorMessage}
+			helpers.WriteJSON(w, http.StatusForbidden, errorMessage)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
 func ValidateJWT(audience, domain string) func(next http.Handler) http.Handler {
 	issuerURL, err := url.Parse("https://" + domain + "/")
@@ -32,6 +67,11 @@ func ValidateJWT(audience, domain string) func(next http.Handler) http.Handler {
 		validator.RS256,
 		issuerURL.String(),
 		[]string{audience},
+		validator.WithCustomClaims(
+			func() validator.CustomClaims {
+				return &CustomClaims{}
+			},
+		),
 	)
 	if err != nil {
 		log.Fatalf("Failed to set up the jwt validator")
