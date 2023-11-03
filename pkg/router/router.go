@@ -12,8 +12,8 @@ func Router() http.Handler {
 
 	router.HandleFunc("/", middleware.NotFoundHandler)
 	router.HandleFunc("/api/messages/public", middleware.PublicApiHandler)
-	router.HandleFunc("/api/messages/protected", middleware.ProtectedApiHandler)
-	router.HandleFunc("/api/messages/admin", middleware.AdminApiHandler)
-
+	router.Handle("/api/messages/protected", middleware.ValidateJWT()(http.HandlerFunc(middleware.ProtectedApiHandler)))
+	router.Handle("/api/messages/admin", middleware.ValidateJWT()(http.HandlerFunc(middleware.AdminApiHandler)))
+ 
 	return middleware.HandleCacheControl(router)
 }
